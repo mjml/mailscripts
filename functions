@@ -1,0 +1,41 @@
+#!/bin/bash
+
+function get_bad_ips () {
+
+    perl -ne '/Received: from \[([^\]]*?)\]/m and print "$1\n"' /home/mike/.maildir/.Junk/cur/* |
+		  sort -n | # Sort all these IPs
+		  uniq -c | # Filter uniques and count
+		  awk -e '{ print $2 "/32 " $1  }' |
+		  sort -n  # Sort by count
+    
+}
+
+
+function get_bad_hostnames () {
+
+    perl -ne '/Received: by (\S+) id/m and print "$1\n"' /home/mike/.maildir/.Junk/cur/*
+    
+}
+
+function lookup_hostname () {
+
+    hn=$1
+    output=$(nslookup $hn)
+    if [[ $? -eq 0 ]]; then
+	echo "$output" | perl -ne 'if (/answer/) { $answer=1; } elsif (/Address: (.*)/) { print "$1\n"; exit }'
+    fi
+    
+}
+
+function create_firewall_rules () {
+    if [[ $1 == "-b" ]]; then
+	block="-b"
+    fi
+    export -f lookup_hostname
+    ips1=$(get_bad_hostnames | parallel -j 30 lookup_hostname | awk -e '{ print $1 "/32 1" }')
+    ips2=$(get_bad_ips)
+    ips3=$(echo -e "$ips1\n$ips2" | sort -n)
+    echo "$ips3" | cidrcompressor/cidrcompressor $block | awk -e '{ print "iptables -t filter -A SMTP -s " $1 " -j DROP"  }'
+    
+}
+

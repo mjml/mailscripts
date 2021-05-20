@@ -1,0 +1,11 @@
+[Unit]
+Description=Occasionally ban the worst junk mail spammers with iptables
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+WorkingDirectory=/home/mike/devtree/mailscripts
+ExecStart=/usr/bin/bash ./create-firewall-rules.sh

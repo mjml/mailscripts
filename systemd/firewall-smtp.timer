@@ -1,0 +1,9 @@
+[Unit]
+Description=Every morning, firewall the worst junk mail senders
+
+[Timer]
+OnCalendar=*-*-* 10:00:00
+Unit=firewall-smtp.service
+
+[Install]
+WantedBy=timers.target

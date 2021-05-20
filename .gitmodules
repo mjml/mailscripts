@@ -1,0 +1,3 @@
+[submodule "cidrcompressor"]
+	path = cidrcompressor
+	url = https://github.com/mjml/cidrcomprsesor
