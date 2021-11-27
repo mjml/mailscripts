@@ -1,5 +1,7 @@
 #!/bin/bash
 
+
+# Gets all "bad" addresses from Junk folder, then prints them as a /32 CIDR in column 1 with their counter in column 2
 function get_bad_ips () {
 
     perl -ne '/Received: from \[([^\]]*?)\]/m and print "$1\n"' /home/mike/.maildir/.Junk/cur/* |
@@ -10,22 +12,82 @@ function get_bad_ips () {
     
 }
 
-
+# Gets all "bad" hostnames from Junk folder, then prints them in column 1 with a counter in column 2
 function get_bad_hostnames () {
     
     perl -ne '/Received: by (\S+) id/m and print "$1\n"' /home/mike/.maildir/.Junk/cur/*
     
 }
 
-
+# Resolves a hostname to an ip
 function lookup_hostname () {
     
     hn=$1
-    output=$(nslookup $hn)
-    if [[ $? -eq 0 ]]; then
-        echo "$output" | perl -ne 'if (/answer/) { $answer=1; } elsif (/Address: (.*)/) { print "$1\n"; exit }'
+    unset ip
+    declare -gA hc
+
+    # First check if it's in the cache
+    value=${hc[$hn]}
+    today=$(date +"%Y%m%d")
+    if [[ -n "$value" ]]; then
+	IFS=' ';
+	read addr since <<< "$value"
+	if [[ -z "$since" ]]; then
+	    printf "Error: for $hn\n" >/dev/stderr
+	    printf "value=$value\n" >/dev/stderr
+	    printf "addr=$addr\n" >/dev/stderr
+	    printf "since=$since\n" >/dev/stderr
+	    return
+	fi
+	elapsed=$(($today - $since))
+	if [[ ($addr != '-') && ($elapsed -lt 30) ]]; then
+	    ip=$addr
+	    echo $ip
+	    return
+	fi
     fi
+
+    # If it isn't in the cache, look it up
+    if [[ -z "$ip" ]]; then
+	output=$(nslookup $hn)
+	if [[ $? -eq 0 ]]; then
+	    ip=$(echo "$output" | perl -ne 'if (/answer/) { $answer=1; } elsif (/Address: (.*)/) { print "$1\n"; exit }')
+	    if [[ -z "$ip" ]]; then
+		ip='-'
+	    fi
+	    value="$ip $(date +%Y%m%d)"
+	    hc[$hn]=$value
+	    echo $ip
+	else
+	    value="- $(date +%Y%m%d)"
+	    hc[$hn]=$value
+	fi
+    fi
+}
+
+function load_hostname_cache () {
+
+    declare -gA hc
     
+    readarray -t lines < hostname.cache
+    echo "Hostname cache has ${#lines[@]} lines"
+    for line in "${lines[@]}"; do
+	k=${line%%=*}
+	v=${line#*=}
+	hc[$k]="$v"
+    done
+
+}
+
+function save_hostname_cache () {
+
+    declare -gA hc
+
+    truncate -s 0 hostname.cache
+    for k in "${!hc[@]}"; do
+	v="${hc[$k]}"
+	echo "$k=$v" >> hostname.cache
+    done
 }
 
 
@@ -39,16 +101,27 @@ function lookup_asn () {
 function create_firewall_rules () {
     
     if [[ $1 == "-b" ]]; then
-        block="-b"
+        blockonly="-b"
+    fi
+    if [[ ! -e hostname.cache ]]; then
+	touch hostname.cache
     fi
     export -f lookup_hostname
-    ips1=$(get_bad_hostnames | parallel -j 30 lookup_hostname | awk -e '{ print $1 "/32 1" }')
+    load_hostname_cache 
+    hosts=$(get_bad_hostnames)
+    ips1=''
+    IFS=$'\n'
+    while read host; do
+	ips1+=$(lookup_hostname "$host")
+    done <<< "$hosts"
+    
+    save_hostname_cache 
     ips2=$(get_bad_ips)
     ips3=$(cat data/manual-bad-cidr.txt)
     ips4=$(cat data/quadranet.txt)
     ips=$(echo -e "$ips1\n$ips2\n$ips3" | sort -n)
     
-    echo "$ips" | cidrcompressor/cidrcompressor $block | awk -e '{ print "iptables -t filter -A SMTP -s " $1 " -j DROP"  }'
+    echo "$ips" | cidrcompressor/cidrcompressor $blockonly | awk -e '{ print "iptables -t filter -A SMTP -s " $1 " -j DROP"  }'
     
 }
 

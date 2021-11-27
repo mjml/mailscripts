@@ -1,2 +1,5 @@
 iptables-lowlifes-cmds
 ips.txt
+iptables-cmds.sh
+data
+hostname.cache

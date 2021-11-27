@@ -1,31 +1,38 @@
 #!/bin/bash
 
-# Options:
-#  -q:            Don't evaluate the rules, just print them
-#  -b,--block:    Don't process the /32 addresses, only the CIDR blocks
+. ./functions
 
-cmdline=$(getopt -o qb --long block -- "$@")
-eval set -- "$cmdline"
-while true; do
-    case "$1" in
-	-q)
-	    quiet=1; shift 1 ;;
-	-b|--block)
-	    block="-b"; shift 1 ;;
-	--) shift ; break ;;
-	*) echo "$1"; exit 1 ;;
-    esac 
-done
+echo "Getting bad ips from hostnames..."
+export -f lookup_hostname
+declare -A hc
+touch hostname.cache
+load_hostname_cache hc
 
-source ./functions
+hosts="$(get_bad_hostnames)"
 
-iptables -t filter -F SMTP
+echo "Number of hosts: $(wc -l <<< "$hosts")"
+echo "Looking up hostnames..."
+ips1=''
+IFS=$'\n'
+while read host; do
+    ips1+=$(lookup_hostname "$host")
+done <<< "$hosts"
 
-rulecmds=$(create_firewall_rules $block)
+save_hostname_cache hc
+echo "Hostname cache size:"
+wc -l hostname.cache
+echo "Getting bad ips from emails..."
+ips2=$(get_bad_ips)
+echo "Adding in hand-tailored lists..."
+ips3=$(cat data/manual-bad-cidr.txt)
+ips4=$(cat data/quadranet.txt)
+ips=$(echo -e "$ips1\n$ips2\n$ips3" | sort -n)
 
-if [[ -z $quiet ]]; then
-    eval "$rulecmds"
-else
-    echo "$rulecmds"
-fi
+echo "$ips" | cidrcompressor/cidrcompressor | sort -k 2 -n | awk -e '{ print "iptables -t filter -A SMTP -s " $1 " -j DROP"  }' > iptables-cmds.sh
+
+iptables -t filter -f SMTP
+
+source ./iptables-cmds.sh
+
+
 
