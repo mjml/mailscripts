@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Options:
-#  -n:            Don't evaluate the rules, just print them
+#  -q:            Don't evaluate the rules, just print them
 #  -b,--block:    Don't process the /32 addresses, only the CIDR blocks
 
-cmdline=$(getopt -o nb --long block -- "$@")
+cmdline=$(getopt -o qb --long block -- "$@")
 eval set -- "$cmdline"
 while true; do
     case "$1" in
